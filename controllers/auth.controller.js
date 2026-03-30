@@ -17,3 +17,15 @@ export const me = async (req, res) => {
     res.status(400).json({ message: err.message });
   }
 };
+
+export const injectUserCredential = async (req, res) => {
+  try {
+    const result = await authService.injectUserCredential(
+      req.body,
+      req.headers["x-seed-key"]
+    );
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+};

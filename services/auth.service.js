@@ -1,6 +1,9 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { findUserByUsername } from "../repositories/auth.repository.js";
+import {
+  findUserByUsername,
+  upsertUserCredential,
+} from "../repositories/auth.repository.js";
 
 export const login = async ({ username, password }) => {
   if (!username || !password) {
@@ -46,5 +49,47 @@ export const getCurrentUser = async (user) => {
     fullname: user.fullname,
     position: user.role,
     secId: user.secId,
+  };
+};
+
+export const injectUserCredential = async (
+  { username, fullname, password, position, secId, seedKey },
+  headerSeedKey
+) => {
+  const configuredSeedKey = process.env.AUTH_SEED_KEY;
+  const providedSeedKey = headerSeedKey || seedKey;
+
+  if (!configuredSeedKey) {
+    throw new Error("AUTH_SEED_KEY is not configured.");
+  }
+
+  if (!providedSeedKey || providedSeedKey !== configuredSeedKey) {
+    throw new Error("Invalid seed key.");
+  }
+
+  if (!username || !fullname || !password || !position) {
+    throw new Error("Username, fullname, password, and position are required.");
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  const user = await upsertUserCredential({
+    username,
+    fullname,
+    passwordHash,
+    position,
+    secId,
+  });
+
+  return {
+    message: "User credential injected successfully",
+    user: {
+      id: user.usr_id,
+      username: user.usr_username,
+      fullname: user.usr_fullname,
+      position: user.usr_positions,
+      secId: user.sec_id,
+      createdAt: user.created_at,
+    },
   };
 };
