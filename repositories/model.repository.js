@@ -60,6 +60,7 @@ export const getModels = async ({
         SELECT
         ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS RowNumber,
         mdl.mdl_id AS Id,
+        lne.lne_id AS LineId,
         lne.lne_code AS Line,
         mdl.mdl_code AS Code,
         mdl.mdl_status AS Status
