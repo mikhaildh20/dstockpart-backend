@@ -122,3 +122,48 @@ export const assignPartsToModel = async (req, res) => {
         );
     }
 };
+
+export const getPartSectionDetails = async (req, res) => {
+    try {
+        const result = await partService.getPartSectionDetails({
+            id: req.params.id,
+        });
+
+        return res.status(200).json(
+            success(result, "Part section details retrieved successfully")
+        );
+    } catch (err) {
+        console.error("GET PART SECTION DETAILS ERROR:", err);
+
+        return res.status(500).json(
+            error(err.message || "Error retrieving part section details")
+        );
+    }
+};
+
+export const savePartSectionDetails = async (req, res) => {
+    try {
+        const sectionIds = req.body.sectionIds
+            || req.body.SectionIds
+            || req.body.sections
+            || req.body.Sections
+            || [];
+
+        const result = await partService.savePartSectionDetails({
+            mpdId: req.body.mpdId || req.body.MpdId,
+            sectionIds,
+        });
+
+        return res.status(200).json(
+            success(result, "Part section details updated successfully")
+        );
+    } catch (err) {
+        console.error("SAVE PART SECTION DETAILS ERROR:", err);
+        const message = err.message || "Error saving part section details";
+        const statusCode = message.includes("cannot be unassigned") ? 400 : 500;
+
+        return res.status(statusCode).json(
+            error(message)
+        );
+    }
+};

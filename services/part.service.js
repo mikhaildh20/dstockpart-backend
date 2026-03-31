@@ -61,3 +61,23 @@ export const assignsPartsToModel = async ({ modelId, assignIds, unassignIds }) =
 
     return result;
 };
+
+export const getPartSectionDetails = async ({ id }) => {
+    const result = await partRepository.getPartSectionDetails({ id });
+
+    if (!result) {
+        throw new Error("Failed to fetch part section details");
+    }
+
+    return result;
+};
+
+export const savePartSectionDetails = async ({ mpdId, sectionIds }) => {
+    const result = await partRepository.savePartSectionDetails({ mpdId, sectionIds });
+
+    if (!result) {
+        throw new Error("Failed to save part section details");
+    }
+
+    return result;
+};
