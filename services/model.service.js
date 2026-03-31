@@ -52,3 +52,13 @@ export const toggleModelStatus = async ({ id }) => {
 
     return result;
 };
+
+export const assignsModelsToLine = async ({ lineId, assignIds, unassignIds }) => {
+    const result = await modelRepository.assignModelsToLine({ lineId, assignIds, unassignIds });
+
+    if (!result) {
+        throw new Error("Failed to assign models to line");
+    }
+
+    return result;
+};

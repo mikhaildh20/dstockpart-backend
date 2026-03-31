@@ -1,82 +1,93 @@
 import db from "../config/db.js";
 
 export const getModels = async ({
-    keyword = null,
-    status = null,
-    sort = "lne_code ASC",
-    page = 1,
-    limit = 10,
+  keyword = null,
+  status = null,
+  lineDetail = false, 
+  lineId = null,      
+  sort = "lne_code ASC",
+  page = 1,
+  limit = 10,
 }) => {
-    const offset = (page - 1) * limit;
+  const offset = (page - 1) * limit;
 
-    let whereClause = "WHERE 1=1";
-    const params = [
-        { name: "offset", type: db.sql.Int, value: offset },
-        { name: "limit", type: db.sql.Int, value: limit },
-    ];
+  let whereClause = "WHERE 1=1";
+  const params = [
+    { name: "offset", type: db.sql.Int, value: offset },
+    { name: "limit", type: db.sql.Int, value: limit },
+  ];
 
-    if (keyword) {
-        whereClause += " AND (mdl.mdl_code LIKE @keyword OR lne.lne_code LIKE @keyword)";
-        params.push({
-        name: "keyword",
-        type: db.sql.VarChar(100),
-        value: `%${keyword}%`,
-        });
-    }
- 
-    if (status !== null && status !== undefined && status !== "") {
-        whereClause += " AND mdl.mdl_status = @status";
-        params.push({
-        name: "status",
+  if (keyword) {
+    whereClause += " AND (mdl.mdl_code LIKE @keyword OR lne.lne_code LIKE @keyword)";
+    params.push({
+      name: "keyword",
+      type: db.sql.VarChar(100),
+      value: `%${keyword}%`,
+    });
+  }
+
+  if (status !== null && status !== undefined && status !== "") {
+    whereClause += " AND mdl.mdl_status = @status";
+    params.push({
+      name: "status",
+      type: db.sql.Int,
+      value: Number(status),
+    });
+  }
+
+  if (lineDetail && lineId !== null && lineId !== undefined && lineId !== "") {
+    whereClause += " AND (mdl.lne_id = @lineId OR mdl.lne_id IS NULL)";
+    params.push({
+        name: "lineId",
         type: db.sql.Int,
-        value: Number(status),
-        });
+        value: Number(lineId),
+    });
     }
 
-    let orderBy = "mdl.mdl_code ASC";
+  let orderBy = "mdl.mdl_code ASC";
 
-    const sortMap = {
-        "mdl_code ASC": "mdl.mdl_code ASC",
-        "mdl_code DESC": "mdl.mdl_code DESC",
-        "lne_code ASC": "lne.lne_code ASC",
-        "lne_code DESC": "lne.lne_code DESC",
-    };
+  const sortMap = {
+    "mdl_code ASC": "mdl.mdl_code ASC",
+    "mdl_code DESC": "mdl.mdl_code DESC",
+    "lne_code ASC": "lne.lne_code ASC",
+    "lne_code DESC": "lne.lne_code DESC",
+  };
 
-    if (sortMap[sort]) {
-        orderBy = sortMap[sort];
-    }
+  if (sortMap[sort]) {
+    orderBy = sortMap[sort];
+  }
 
-    const countQuery = `
-        SELECT COUNT(1) AS TotalData
-        FROM dsc_models mdl
-        JOIN dsc_lines lne ON mdl.lne_id = lne.lne_id
-        ${whereClause}
-    `;
+  // 🔥 TOTAL
+  const countQuery = `
+    SELECT COUNT(1) AS TotalData
+    FROM dsc_models mdl
+    JOIN dsc_lines lne ON mdl.lne_id = lne.lne_id
+    ${whereClause}
+  `;
 
-    const countResult = await db.query(countQuery, params);
-    const totalData = countResult[0]?.TotalData || 0;
+  const countResult = await db.query(countQuery, params);
+  const totalData = countResult[0]?.TotalData || 0;
 
-    const dataQuery = `
-        SELECT
-        ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS RowNumber,
-        mdl.mdl_id AS Id,
-        lne.lne_id AS LineId,
-        lne.lne_code AS Line,
-        mdl.mdl_code AS Code,
-        mdl.mdl_status AS Status
-        FROM dsc_models mdl
-        LEFT JOIN dsc_lines lne ON mdl.lne_id = lne.lne_id
-        ${whereClause}
-        ORDER BY ${orderBy}
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `;
+  const dataQuery = `
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS RowNumber,
+      mdl.mdl_id AS Id,
+      lne.lne_code AS Line,
+      mdl.mdl_code AS Code,
+      mdl.mdl_status AS Status
+    FROM dsc_models mdl
+    LEFT JOIN dsc_lines lne ON mdl.lne_id = lne.lne_id
+    ${whereClause}
+    ORDER BY ${orderBy}
+    OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+  `;
 
-    const dataResult = await db.query(dataQuery, params);
+  const dataResult = await db.query(dataQuery, params);
 
-    return {
-        TotalData: totalData,
-        Data: dataResult,
-    };
+  return {
+    TotalData: totalData,
+    Data: dataResult,
+  };
 };
 
 export const createModel = async ({ code }) => {
@@ -149,7 +160,7 @@ export const updateModel = async ({ id, code }) => {
 
     const query = `
         UPDATE dsc_models
-        SET mdl_code = @code
+        SET mdl_code = @code, updated_at = GETDATE()
         WHERE mdl_id = @id
     `;
 
@@ -197,3 +208,47 @@ export const toggleModelStatus = async ({ id }) => {
             : "Model disabled successfully.",
     };
 }
+
+export const assignModelsToLine = async ({ lineId, assignIds = [], unassignIds = [] }) => {
+    if (!lineId) {
+        throw new Error("Line ID is required");
+    }
+
+    const safeAssignIds = assignIds.map(Number).filter(n => !isNaN(n));
+    const safeUnassignIds = unassignIds.map(Number).filter(n => !isNaN(n));
+
+    // 🔥 ASSIGN
+    if (safeAssignIds.length > 0) {
+        const params = [
+            {
+                name: "lineId",
+                type: db.sql.Int,
+                value: Number(lineId),
+            }
+        ];
+
+        const assignQuery = `
+            UPDATE dsc_models
+            SET lne_id = @lineId
+            WHERE mdl_id IN (${safeAssignIds.join(",")})
+        `;
+
+        await db.query(assignQuery, params);
+    }
+
+    // 🔥 UNASSIGN
+    if (safeUnassignIds.length > 0) {
+        const unassignQuery = `
+            UPDATE dsc_models
+            SET lne_id = NULL
+            WHERE mdl_id IN (${safeUnassignIds.join(",")})
+        `;
+
+        await db.query(unassignQuery);
+    }
+
+    return {
+        Assigned: safeAssignIds.length,
+        Unassigned: safeUnassignIds.length,
+    };
+};

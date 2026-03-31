@@ -8,5 +8,6 @@ router.post("/create", modelController.createModel);
 router.get("/:id", modelController.getModelById);
 router.put("/update", modelController.updateModel);
 router.post("/toggle-status", modelController.toggleModelStatus);
+router.post("/assign-to-line", modelController.assignModelsToLine);
 
 export default router;
