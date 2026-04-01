@@ -224,6 +224,39 @@ export const getWipModelDetail = async ({ modelId }) => {
         params
     );
 
+    const missingSectionParts = await db.query(
+        `
+        SELECT
+            mpd.mpd_id AS MpdId,
+            prt.prt_code AS PartCode,
+            prt.prt_name AS PartName,
+            COUNT(mpsd.mpsd_id) AS SectionCount,
+            SUM(
+                CASE
+                    WHEN wpl.wpl_id IS NOT NULL THEN 1
+                    ELSE 0
+                END
+            ) AS PlanRowCount
+        FROM dsc_model_part_details mpd
+        INNER JOIN dsc_parts prt
+            ON prt.prt_id = mpd.prt_id
+        LEFT JOIN dsc_model_part_section_details mpsd
+            ON mpsd.mpd_id = mpd.mpd_id
+        LEFT JOIN dsc_wip_plannings wpl
+            ON wpl.mpd_id = mpd.mpd_id
+            AND wpl.sft_id = @shiftId
+            AND CAST(wpl.created_at AS DATE) = CAST(GETDATE() AS DATE)
+        WHERE mpd.mdl_id = @modelId
+        GROUP BY
+            mpd.mpd_id,
+            prt.prt_code,
+            prt.prt_name
+        HAVING COUNT(mpsd.mpsd_id) = 0
+        ORDER BY prt.prt_code ASC
+    `,
+        params
+    );
+
     return {
         ModelId: model.Id,
         ModelCode: model.Code,
@@ -234,6 +267,7 @@ export const getWipModelDetail = async ({ modelId }) => {
         ShiftEnd: currentShift.EndTime,
         CanInput: true,
         Sections: details,
+        MissingSectionParts: missingSectionParts,
     };
 };
 

@@ -85,6 +85,9 @@ export const getParts = async ({
         SELECT
             ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS RowNumber,
             prt.prt_id   AS Id,
+            ${modelDetail ? `
+            mpd.mpd_id AS MpdId,
+            ` : ""}
             prt.prt_code AS Code,
             prt.prt_name AS Name,
             ${modelDetail ? `
@@ -306,15 +309,15 @@ export const getPartSectionDetails = async ({ id }) => {
         throw new Error("Part detail ID must be a number");
     }
 
-    const contextParams = [
+    const contextByMpdParams = [
         {
-            name: "id",
+            name: "mpdId",
             type: db.sql.Int,
             value: numericId,
         },
     ];
 
-    const contextQuery = `
+    const contextByMpdQuery = `
         SELECT TOP 1
             mpd.mpd_id AS MpdId,
             mpd.prt_id AS PartId,
@@ -327,17 +330,51 @@ export const getPartSectionDetails = async ({ id }) => {
             ON prt.prt_id = mpd.prt_id
         LEFT JOIN dsc_models mdl
             ON mdl.mdl_id = mpd.mdl_id
-        WHERE mpd.mpd_id = @id OR mpd.prt_id = @id
-        ORDER BY
-            CASE WHEN mpd.mpd_id = @id THEN 0 ELSE 1 END,
-            mpd.mpd_id DESC
+        WHERE mpd.mpd_id = @mpdId
     `;
 
-    const contextResult = await db.query(contextQuery, contextParams);
-    const context = contextResult[0];
+    const contextByMpdResult = await db.query(contextByMpdQuery, contextByMpdParams);
+    let context = contextByMpdResult[0];
 
     if (!context) {
-        throw new Error("Part is not assigned to any model yet");
+        const contextByPartParams = [
+            {
+                name: "partId",
+                type: db.sql.Int,
+                value: numericId,
+            },
+        ];
+
+        const contextByPartQuery = `
+            SELECT
+                mpd.mpd_id AS MpdId,
+                mpd.prt_id AS PartId,
+                mpd.mdl_id AS ModelId,
+                prt.prt_code AS PartCode,
+                prt.prt_name AS PartName,
+                mdl.mdl_code AS ModelCode
+            FROM dsc_model_part_details mpd
+            INNER JOIN dsc_parts prt
+                ON prt.prt_id = mpd.prt_id
+            LEFT JOIN dsc_models mdl
+                ON mdl.mdl_id = mpd.mdl_id
+            WHERE mpd.prt_id = @partId
+            ORDER BY mpd.mpd_id DESC
+        `;
+
+        const contextByPartResult = await db.query(contextByPartQuery, contextByPartParams);
+
+        if (!contextByPartResult.length) {
+            throw new Error("Part is not assigned to any model yet");
+        }
+
+        if (contextByPartResult.length > 1) {
+            throw new Error(
+                "Part is assigned to multiple models. Open the part detail from Model Detail page to manage section sequence for a specific model."
+            );
+        }
+
+        context = contextByPartResult[0];
     }
 
     const sectionParams = [
