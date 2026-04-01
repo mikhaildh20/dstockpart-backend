@@ -188,13 +188,16 @@ export const getDashboardByModel = async ({ modelId, shiftId = null, date = null
         ),
         PlanAgg AS (
             SELECT
-                wpl.mpd_id AS MpdId,
+                mpd.mdl_id AS ModelId,
                 ISNULL(MAX(CASE WHEN wpl.side = 'R' THEN wpl.planned_qty END), 0) AS PlanR,
                 ISNULL(MAX(CASE WHEN wpl.side = 'L' THEN wpl.planned_qty END), 0) AS PlanL
             FROM dsc_wip_plannings wpl
+            INNER JOIN dsc_model_part_details mpd
+                ON mpd.mpd_id = wpl.mpd_id
             WHERE wpl.sft_id = @shiftId
+                AND mpd.mdl_id = @modelId
                 AND CAST(wpl.created_at AS DATE) = @targetDate
-            GROUP BY wpl.mpd_id
+            GROUP BY mpd.mdl_id
         )
         SELECT
             pb.MpdId,
@@ -209,7 +212,7 @@ export const getDashboardByModel = async ({ modelId, shiftId = null, date = null
             ISNULL(fa.FinishL, 0) AS FinishL
         FROM PartBase pb
         LEFT JOIN PlanAgg pa
-            ON pa.MpdId = pb.MpdId
+            ON pa.ModelId = @modelId
         LEFT JOIN CurrentAgg ca
             ON ca.MpdId = pb.MpdId
         LEFT JOIN FinishAgg fa
@@ -282,24 +285,9 @@ export const getDashboardByModel = async ({ modelId, shiftId = null, date = null
             FROM CalendarDays
             WHERE SummaryDate < CAST(@monthEnd AS DATE)
         ),
-        PartBase AS (
-            SELECT
-                mpd.mpd_id AS MpdId,
-                prt.prt_code AS PartCode,
-                prt.prt_name AS PartName,
-                MIN(ISNULL(mpsd.sequence, 99999)) AS DisplaySequence
-            FROM dsc_model_part_details mpd
-            INNER JOIN dsc_parts prt
-                ON prt.prt_id = mpd.prt_id
-            LEFT JOIN dsc_model_part_section_details mpsd
-                ON mpsd.mpd_id = mpd.mpd_id
-            WHERE mpd.mdl_id = @modelId
-            GROUP BY mpd.mpd_id, prt.prt_code, prt.prt_name
-        ),
         DailyPlan AS (
             SELECT
                 CAST(wpl.created_at AS DATE) AS SummaryDate,
-                wpl.mpd_id AS MpdId,
                 ISNULL(MAX(CASE WHEN wpl.side = 'R' THEN wpl.planned_qty END), 0) AS QtyR,
                 ISNULL(MAX(CASE WHEN wpl.side = 'L' THEN wpl.planned_qty END), 0) AS QtyL
             FROM dsc_wip_plannings wpl
@@ -308,22 +296,16 @@ export const getDashboardByModel = async ({ modelId, shiftId = null, date = null
             WHERE mpd.mdl_id = @modelId
                 AND wpl.sft_id = @shiftId
                 AND CAST(wpl.created_at AS DATE) BETWEEN @monthStart AND @monthEnd
-            GROUP BY CAST(wpl.created_at AS DATE), wpl.mpd_id
+            GROUP BY CAST(wpl.created_at AS DATE)
         )
         SELECT
             cal.SummaryDate AS SummaryDate,
-            pb.MpdId,
-            pb.PartCode,
-            pb.PartName,
-            pb.DisplaySequence,
             ISNULL(dp.QtyR, 0) AS QtyR,
             ISNULL(dp.QtyL, 0) AS QtyL
         FROM CalendarDays cal
-        CROSS JOIN PartBase pb
         LEFT JOIN DailyPlan dp
             ON dp.SummaryDate = cal.SummaryDate
-            AND dp.MpdId = pb.MpdId
-        ORDER BY cal.SummaryDate ASC, pb.DisplaySequence ASC, pb.PartCode ASC
+        ORDER BY cal.SummaryDate ASC
         OPTION (MAXRECURSION 31)
     `;
 
@@ -408,15 +390,11 @@ export const getDashboardByModel = async ({ modelId, shiftId = null, date = null
 
     const monthlyPlan = await db.query(monthlyPlanQuery, baseParams);
     const monthlyActual = await db.query(monthlyActualQuery, baseParams);
-    const planByPart = parts.map((part) => ({
-        MpdId: part.MpdId,
-        PartCode: part.PartCode,
-        PartName: part.PartName,
-        DisplaySequence: part.DisplaySequence,
-        QtyR: Number(part.PlanR || 0),
-        QtyL: Number(part.PlanL || 0),
-        Total: Number(part.PlanR || 0) + Number(part.PlanL || 0),
-    }));
+    const planSummary = {
+        QtyR: Number(parts[0]?.PlanR || 0),
+        QtyL: Number(parts[0]?.PlanL || 0),
+        Total: Number(parts[0]?.PlanR || 0) + Number(parts[0]?.PlanL || 0),
+    };
 
     return {
         ModelId: model.ModelId,
@@ -431,7 +409,7 @@ export const getDashboardByModel = async ({ modelId, shiftId = null, date = null
         FilterMonth: targetMonth,
         Parts: parts,
         Sections: sections,
-        PlanByPart: planByPart,
+        PlanSummary: planSummary,
         MonthlyPlan: monthlyPlan,
         MonthlyActual: monthlyActual,
     };

@@ -106,6 +106,20 @@ export const getPlanModels = async () => {
     return db.query(query);
 };
 
+export const getBasePlanningItems = async () => {
+    const query = `
+        SELECT
+            mdl.mdl_id AS ModelId,
+            mdl.mdl_code AS ModelCode
+        FROM dsc_models mdl
+        WHERE mdl.mdl_status = 1
+        ORDER BY
+            mdl.mdl_code ASC
+    `;
+
+    return db.query(query);
+};
+
 export const getPartsByModel = async ({ modelId }) => {
     if (!modelId) {
         throw new Error("Model ID is required");
@@ -163,10 +177,7 @@ export const getPlans = async ({
     if (keyword) {
         whereClause += `
             AND (
-                mdl.mdl_code LIKE @keyword
-                OR prt.prt_code LIKE @keyword
-                OR prt.prt_name LIKE @keyword
-                OR sft.sft_code LIKE @keyword
+                sft.sft_code LIKE @keyword
                 OR sft.sft_name LIKE @keyword
             )
         `;
@@ -190,8 +201,6 @@ export const getPlans = async ({
         const sortMapSummary = {
             "created_at DESC": "MAX(wpl.created_at) DESC",
             "created_at ASC": "MAX(wpl.created_at) ASC",
-            "model ASC": "mdl.mdl_code ASC",
-            "model DESC": "mdl.mdl_code DESC",
             "shift ASC": "sft.sft_code ASC",
             "shift DESC": "sft.sft_code DESC",
         };
@@ -201,20 +210,13 @@ export const getPlans = async ({
             SELECT COUNT(1) AS TotalData
             FROM (
                 SELECT
-                    mdl.mdl_id,
                     wpl.sft_id,
                     CAST(MAX(wpl.created_at) AS DATE) AS PlanDate
                 FROM dsc_wip_plannings wpl
-                INNER JOIN dsc_model_part_details mpd
-                    ON mpd.mpd_id = wpl.mpd_id
-                INNER JOIN dsc_models mdl
-                    ON mdl.mdl_id = mpd.mdl_id
-                INNER JOIN dsc_parts prt
-                    ON prt.prt_id = mpd.prt_id
                 INNER JOIN dsc_shifts sft
                     ON sft.sft_id = wpl.sft_id
                 ${whereClause}
-                GROUP BY mdl.mdl_id, wpl.sft_id
+                GROUP BY wpl.sft_id, CAST(wpl.created_at AS DATE)
             ) grouped
         `;
 
@@ -225,30 +227,18 @@ export const getPlans = async ({
             SELECT
                 ROW_NUMBER() OVER (ORDER BY ${orderBySummary}) AS RowNumber,
                 MIN(wpl.wpl_id) AS Id,
-                MIN(wpl.mpd_id) AS MpdId,
                 wpl.sft_id AS ShiftId,
-                mdl.mdl_id AS ModelId,
-                mdl.mdl_code AS ModelCode,
                 sft.sft_code AS ShiftCode,
                 sft.sft_name AS ShiftName,
-                SUM(CASE WHEN wpl.side = 'R' THEN wpl.planned_qty ELSE 0 END) AS QtyR,
-                SUM(CASE WHEN wpl.side = 'L' THEN wpl.planned_qty ELSE 0 END) AS QtyL,
                 CAST(MAX(wpl.created_at) AS DATE) AS PlanDate,
                 MAX(wpl.created_at) AS CreatedAt
             FROM dsc_wip_plannings wpl
-            INNER JOIN dsc_model_part_details mpd
-                ON mpd.mpd_id = wpl.mpd_id
-            INNER JOIN dsc_models mdl
-                ON mdl.mdl_id = mpd.mdl_id
-            INNER JOIN dsc_parts prt
-                ON prt.prt_id = mpd.prt_id
             INNER JOIN dsc_shifts sft
                 ON sft.sft_id = wpl.sft_id
             ${whereClause}
             GROUP BY
                 wpl.sft_id,
-                mdl.mdl_id,
-                mdl.mdl_code,
+                CAST(wpl.created_at AS DATE),
                 sft.sft_code,
                 sft.sft_name
             ORDER BY ${orderBySummary}
@@ -368,7 +358,6 @@ export const getPlanById = async ({ id }) => {
     const baseQuery = `
         SELECT TOP 1
             wpl_id AS WplId,
-            mpd_id AS MpdId,
             sft_id AS ShiftId,
             CAST(created_at AS DATE) AS PlanDate
         FROM dsc_wip_plannings
@@ -382,11 +371,6 @@ export const getPlanById = async ({ id }) => {
 
     const metaParams = [
         {
-            name: "mpdId",
-            type: db.sql.Int,
-            value: Number(base[0].MpdId),
-        },
-        {
             name: "shiftId",
             type: db.sql.Int,
             value: Number(base[0].ShiftId),
@@ -395,19 +379,13 @@ export const getPlanById = async ({ id }) => {
 
     const metaQuery = `
         SELECT TOP 1
-            mdl.mdl_id AS ModelId,
-            mdl.mdl_code AS ModelCode,
             sft.sft_id AS ShiftId,
             sft.sft_code AS ShiftCode,
             sft.sft_name AS ShiftName,
             CONVERT(VARCHAR(5), CAST(sft.sft_start AS TIME), 108) AS ShiftStart,
             CONVERT(VARCHAR(5), CAST(sft.sft_end AS TIME), 108) AS ShiftEnd
-        FROM dsc_model_part_details mpd
-        INNER JOIN dsc_models mdl
-            ON mdl.mdl_id = mpd.mdl_id
-        INNER JOIN dsc_shifts sft
-            ON sft.sft_id = @shiftId
-        WHERE mpd.mpd_id = @mpdId
+        FROM dsc_shifts sft
+        WHERE sft.sft_id = @shiftId
     `;
 
     const metaResult = await db.query(metaQuery, metaParams);
@@ -416,12 +394,7 @@ export const getPlanById = async ({ id }) => {
         throw new Error("Plan metadata not found");
     }
 
-    const partsParams = [
-        {
-            name: "modelId",
-            type: db.sql.Int,
-            value: Number(meta.ModelId),
-        },
+    const modelsParams = [
         {
             name: "shiftId",
             type: db.sql.Int,
@@ -434,11 +407,10 @@ export const getPlanById = async ({ id }) => {
         },
     ];
 
-    const partsQuery = `
+    const modelsQuery = `
         SELECT
-            mpd.mpd_id AS MpdId,
-            prt.prt_code AS PartCode,
-            prt.prt_name AS PartName,
+            mdl.mdl_id AS ModelId,
+            mdl.mdl_code AS ModelCode,
             ISNULL(MAX(CASE WHEN wpl.side = 'R' THEN wpl.planned_qty END), 0) AS QtyR,
             ISNULL(MAX(CASE WHEN wpl.side = 'L' THEN wpl.planned_qty END), 0) AS QtyL,
             COALESCE(
@@ -446,19 +418,18 @@ export const getPlanById = async ({ id }) => {
                 MAX(CASE WHEN wpl.side = 'L' THEN wpl.reason END),
                 ''
             ) AS Reason
-        FROM dsc_model_part_details mpd
-        INNER JOIN dsc_parts prt
-            ON prt.prt_id = mpd.prt_id
-        LEFT JOIN dsc_wip_plannings wpl
-            ON wpl.mpd_id = mpd.mpd_id
-            AND wpl.sft_id = @shiftId
+        FROM dsc_wip_plannings wpl
+        INNER JOIN dsc_model_part_details mpd
+            ON mpd.mpd_id = wpl.mpd_id
+        INNER JOIN dsc_models mdl
+            ON mdl.mdl_id = mpd.mdl_id
+        WHERE wpl.sft_id = @shiftId
             AND CAST(wpl.created_at AS DATE) = @planDate
-        WHERE mpd.mdl_id = @modelId
-        GROUP BY mpd.mpd_id, prt.prt_code, prt.prt_name
-        ORDER BY prt.prt_code ASC
+        GROUP BY mdl.mdl_id, mdl.mdl_code
+        ORDER BY mdl.mdl_code ASC
     `;
 
-    const parts = await db.query(partsQuery, partsParams);
+    const models = await db.query(modelsQuery, modelsParams);
     const isPassed = await isShiftPassedForDate({
         shiftId: base[0].ShiftId,
         planDate: base[0].PlanDate,
@@ -466,8 +437,6 @@ export const getPlanById = async ({ id }) => {
 
     return {
         Id: Number(id),
-        ModelId: meta.ModelId,
-        ModelCode: meta.ModelCode,
         ShiftId: meta.ShiftId,
         ShiftCode: meta.ShiftCode,
         ShiftName: meta.ShiftName,
@@ -475,13 +444,14 @@ export const getPlanById = async ({ id }) => {
         ShiftEnd: meta.ShiftEnd,
         PlanDate: base[0].PlanDate,
         CanEdit: !isPassed,
-        Parts: parts,
+        Models: models,
     };
 };
 
 const upsertPlanSides = async ({
     mpdId,
     shiftId,
+    planDate,
     qtyR,
     qtyL,
     reason,
@@ -509,6 +479,11 @@ const upsertPlanSides = async ({
             value: Number(qtyL),
         },
         {
+            name: "planDate",
+            type: db.sql.Date,
+            value: planDate,
+        },
+        {
             name: "reason",
             type: db.sql.VarChar(100),
             value: reason || null,
@@ -529,6 +504,7 @@ const upsertPlanSides = async ({
             updated_at = GETDATE()
         WHERE mpd_id = @mpdId
             AND sft_id = @shiftId
+            AND CAST(created_at AS DATE) = @planDate
             AND side = 'R';
 
         IF @@ROWCOUNT = 0
@@ -545,6 +521,7 @@ const upsertPlanSides = async ({
             updated_at = GETDATE()
         WHERE mpd_id = @mpdId
             AND sft_id = @shiftId
+            AND CAST(created_at AS DATE) = @planDate
             AND side = 'L';
 
         IF @@ROWCOUNT = 0
@@ -560,23 +537,51 @@ const upsertPlanSides = async ({
 const normalizeItems = (items = []) => {
     return (Array.isArray(items) ? items : [])
         .map((item) => ({
-            mpdId: Number(item.mpdId),
+            modelId: Number(item.modelId),
             qtyR: Number(item.qtyR),
             qtyL: Number(item.qtyL),
         }))
         .filter(
             (item) =>
-                !Number.isNaN(item.mpdId) &&
+                !Number.isNaN(item.modelId) &&
                 !Number.isNaN(item.qtyR) &&
                 !Number.isNaN(item.qtyL)
         );
 };
 
+const getModelPartMap = async (modelIds = []) => {
+    const normalizedIds = [...new Set((Array.isArray(modelIds) ? modelIds : [])
+        .map((item) => Number(item))
+        .filter((item) => !Number.isNaN(item)))];
+
+    if (normalizedIds.length === 0) {
+        return new Map();
+    }
+
+    const query = `
+        SELECT
+            mdl_id AS ModelId,
+            mpd_id AS MpdId
+        FROM dsc_model_part_details
+        WHERE mdl_id IN (${normalizedIds.join(",")})
+    `;
+
+    const rows = await db.query(query);
+    const modelPartMap = new Map();
+
+    rows.forEach((row) => {
+        const key = Number(row.ModelId);
+        if (!modelPartMap.has(key)) {
+            modelPartMap.set(key, []);
+        }
+        modelPartMap.get(key).push(Number(row.MpdId));
+    });
+
+    return modelPartMap;
+};
+
 export const createPlan = async ({
-    mpdId,
     shiftId,
-    qtyR,
-    qtyL,
     reason,
     createdBy,
     items = [],
@@ -586,20 +591,21 @@ export const createPlan = async ({
     }
 
     const normalizedItems = normalizeItems(items);
-    const bulkItems = normalizedItems.length > 0
-        ? normalizedItems
-        : [{ mpdId: Number(mpdId), qtyR: Number(qtyR), qtyL: Number(qtyL) }];
-
-    if (bulkItems.length === 0 || bulkItems.some((item) => Number.isNaN(item.mpdId))) {
-        throw new Error("At least one valid part plan is required");
+    if (normalizedItems.length === 0) {
+        throw new Error("At least one valid model planning row is required");
     }
 
-    const mpdIds = [...new Set(bulkItems.map((item) => item.mpdId))];
+    const targetDate = new Date().toISOString().slice(0, 10);
     const duplicateParams = [
         {
             name: "shiftId",
             type: db.sql.Int,
             value: Number(shiftId),
+        },
+        {
+            name: "planDate",
+            type: db.sql.Date,
+            value: targetDate,
         },
     ];
 
@@ -607,38 +613,40 @@ export const createPlan = async ({
         SELECT TOP 1 wpl_id AS Id
         FROM dsc_wip_plannings
         WHERE sft_id = @shiftId
-            AND mpd_id IN (${mpdIds.join(",")})
-            AND CAST(created_at AS DATE) = CAST(GETDATE() AS DATE)
+            AND CAST(created_at AS DATE) = @planDate
     `;
 
     const duplicate = await db.query(duplicateQuery, duplicateParams);
     if (duplicate.length > 0) {
-        throw new Error("A plan for one or more selected parts and this shift has already been created today.");
+        throw new Error("Base planning for this shift has already been created today.");
     }
 
-    for (const item of bulkItems) {
-        await upsertPlanSides({
-            mpdId: item.mpdId,
-            shiftId,
-            qtyR: item.qtyR,
-            qtyL: item.qtyL,
-            reason,
-            createdBy,
-        });
+    const modelPartMap = await getModelPartMap(normalizedItems.map((item) => item.modelId));
+
+    for (const item of normalizedItems) {
+        const mpdIds = modelPartMap.get(item.modelId) || [];
+        for (const mpdId of mpdIds) {
+            await upsertPlanSides({
+                mpdId,
+                shiftId,
+                planDate: targetDate,
+                qtyR: item.qtyR,
+                qtyL: item.qtyL,
+                reason,
+                createdBy,
+            });
+        }
     }
 
     return {
-        TotalSaved: bulkItems.length,
+        TotalSaved: normalizedItems.length,
         ShiftId: Number(shiftId),
     };
 };
 
 export const updatePlan = async ({
     id,
-    mpdId,
     shiftId,
-    qtyR,
-    qtyL,
     reason,
     items = [],
     createdBy,
@@ -678,34 +686,36 @@ export const updatePlan = async ({
         throw new Error("This plan can no longer be edited because the shift time has passed.");
     }
 
-    const normalizedItems = normalizeItems(items);
-    const bulkItems = normalizedItems.length > 0
-        ? normalizedItems
-        : [{ mpdId: Number(mpdId), qtyR: Number(qtyR), qtyL: Number(qtyL) }];
-
     const targetShiftId = Number(shiftId || oldResult[0].ShiftId);
     if (Number.isNaN(targetShiftId)) {
         throw new Error("Shift ID is required");
     }
 
-    if (bulkItems.length === 0 || bulkItems.some((item) => Number.isNaN(item.mpdId))) {
-        throw new Error("At least one valid part plan is required");
+    const normalizedItems = normalizeItems(items);
+    if (normalizedItems.length === 0) {
+        throw new Error("At least one valid model planning row is required");
     }
 
-    for (const item of bulkItems) {
-        await upsertPlanSides({
-            mpdId: item.mpdId,
-            shiftId: targetShiftId,
-            qtyR: item.qtyR,
-            qtyL: item.qtyL,
-            reason,
-            createdBy: createdBy || "system",
-        });
+    const modelPartMap = await getModelPartMap(normalizedItems.map((item) => item.modelId));
+
+    for (const item of normalizedItems) {
+        const mpdIds = modelPartMap.get(item.modelId) || [];
+        for (const mpdId of mpdIds) {
+            await upsertPlanSides({
+                mpdId,
+                shiftId: targetShiftId,
+                planDate,
+                qtyR: item.qtyR,
+                qtyL: item.qtyL,
+                reason,
+                createdBy: createdBy || "system",
+            });
+        }
     }
 
     return {
         Id: Number(id),
         ShiftId: targetShiftId,
-        TotalSaved: bulkItems.length,
+        TotalSaved: normalizedItems.length,
     };
 };

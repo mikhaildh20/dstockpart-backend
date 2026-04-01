@@ -7,6 +7,7 @@ const router = express.Router();
 router.get("/", planController.getPlans);
 router.get("/current-shift", planController.getCurrentShift);
 router.get("/models", planController.getPlanModels);
+router.get("/base-items", planController.getBasePlanningItems);
 router.get("/parts-by-model/:modelId", planController.getPartsByModel);
 router.get("/:id", planController.getPlanById);
 router.post("/create", verifyToken, planController.createPlan);

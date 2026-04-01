@@ -59,6 +59,22 @@ export const getPlanModels = async (req, res) => {
     }
 };
 
+export const getBasePlanningItems = async (req, res) => {
+    try {
+        const result = await planService.getBasePlanningItems();
+
+        return res.status(200).json(
+            success(result, "Base planning items retrieved successfully")
+        );
+    } catch (err) {
+        console.error("GET BASE PLANNING ITEMS ERROR:", err);
+
+        return res.status(500).json(
+            error(err.message || "Error retrieving base planning items")
+        );
+    }
+};
+
 export const getPartsByModel = async (req, res) => {
     try {
         const result = await planService.getPartsByModel({

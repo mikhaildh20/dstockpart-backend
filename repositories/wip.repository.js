@@ -196,6 +196,8 @@ export const getWipModelDetail = async ({ modelId }) => {
             sec.sec_code AS SectionCode,
             sec.sec_name AS SectionName,
             mpsd.sequence AS Sequence,
+            ISNULL(planData.PlanR, 0) AS PlanR,
+            ISNULL(planData.PlanL, 0) AS PlanL,
             ISNULL(MAX(CASE WHEN cur.side = 'R' THEN cur.qty END), 0) AS QtyR,
             ISNULL(MAX(CASE WHEN cur.side = 'L' THEN cur.qty END), 0) AS QtyL
         FROM dsc_model_part_section_details mpsd
@@ -208,6 +210,17 @@ export const getWipModelDetail = async ({ modelId }) => {
         LEFT JOIN dsc_wip_current cur
             ON cur.mpsd_id = mpsd.mpsd_id
             AND cur.sft_id = @shiftId
+        LEFT JOIN (
+            SELECT
+                wpl.mpd_id AS MpdId,
+                ISNULL(MAX(CASE WHEN wpl.side = 'R' THEN wpl.planned_qty END), 0) AS PlanR,
+                ISNULL(MAX(CASE WHEN wpl.side = 'L' THEN wpl.planned_qty END), 0) AS PlanL
+            FROM dsc_wip_plannings wpl
+            WHERE wpl.sft_id = @shiftId
+                AND CAST(wpl.created_at AS DATE) = CAST(GETDATE() AS DATE)
+            GROUP BY wpl.mpd_id
+        ) planData
+            ON planData.MpdId = mpd.mpd_id
         WHERE mpd.mdl_id = @modelId
         GROUP BY
             mpsd.mpsd_id,
@@ -216,7 +229,9 @@ export const getWipModelDetail = async ({ modelId }) => {
             prt.prt_name,
             sec.sec_code,
             sec.sec_name,
-            mpsd.sequence
+            mpsd.sequence,
+            planData.PlanR,
+            planData.PlanL
         ORDER BY
             prt.prt_code ASC,
             mpsd.sequence ASC

@@ -36,6 +36,11 @@ export const getPlanModels = async () => {
     return result || [];
 };
 
+export const getBasePlanningItems = async () => {
+    const result = await planRepository.getBasePlanningItems();
+    return result || [];
+};
+
 export const getPartsByModel = async ({ modelId }) => {
     const result = await planRepository.getPartsByModel({ modelId });
     return result || [];
@@ -52,32 +57,19 @@ export const getPlanById = async ({ id }) => {
 };
 
 export const createPlan = async ({
-    mpdId,
     shiftId,
-    qtyR,
-    qtyL,
     reason,
     createdBy,
     items = [],
 }) => {
     const normalizedItems = (Array.isArray(items) ? items : []).map((item, index) => ({
-        mpdId: Number(item.mpdId),
+        modelId: Number(item.modelId),
         qtyR: toNonNegativeInt(item.qtyR, `R quantity (row ${index + 1})`),
         qtyL: toNonNegativeInt(item.qtyL, `L quantity (row ${index + 1})`),
     }));
 
-    const normalizedQtyR = qtyR !== undefined && qtyR !== null
-        ? toNonNegativeInt(qtyR, "R quantity")
-        : 0;
-    const normalizedQtyL = qtyL !== undefined && qtyL !== null
-        ? toNonNegativeInt(qtyL, "L quantity")
-        : 0;
-
     const result = await planRepository.createPlan({
-        mpdId,
         shiftId,
-        qtyR: normalizedQtyR,
-        qtyL: normalizedQtyL,
         reason,
         createdBy,
         items: normalizedItems,
@@ -92,10 +84,7 @@ export const createPlan = async ({
 
 export const updatePlan = async ({
     id,
-    mpdId,
     shiftId,
-    qtyR,
-    qtyL,
     reason,
     items = [],
     createdBy,
@@ -107,24 +96,14 @@ export const updatePlan = async ({
     }
 
     const normalizedItems = (Array.isArray(items) ? items : []).map((item, index) => ({
-        mpdId: Number(item.mpdId),
+        modelId: Number(item.modelId),
         qtyR: toNonNegativeInt(item.qtyR, `R quantity (row ${index + 1})`),
         qtyL: toNonNegativeInt(item.qtyL, `L quantity (row ${index + 1})`),
     }));
 
-    const normalizedQtyR = qtyR !== undefined && qtyR !== null
-        ? toNonNegativeInt(qtyR, "R quantity")
-        : 0;
-    const normalizedQtyL = qtyL !== undefined && qtyL !== null
-        ? toNonNegativeInt(qtyL, "L quantity")
-        : 0;
-
     const result = await planRepository.updatePlan({
         id,
-        mpdId,
         shiftId,
-        qtyR: normalizedQtyR,
-        qtyL: normalizedQtyL,
         reason: normalizedReason,
         items: normalizedItems,
         createdBy,
